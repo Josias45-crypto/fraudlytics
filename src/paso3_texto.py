@@ -1,160 +1,156 @@
 # ============================================================
-# FRAUDLYTICS - PASO 3: Procesamiento de Texto
-# NLTK y Scikit-learn
+# FRAUDLYTICS - Interfaz Web con Autenticación
+# Streamlit + Streamlit Authenticator
 # ============================================================
 
+import streamlit as st
+import streamlit_authenticator as stauth
 import pandas as pd
 import numpy as np
-import nltk
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
-from nltk.util import ngrams
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import TruncatedSVD
-from collections import Counter
-
-# Descarga de recursos NLTK
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('wordnet')
-nltk.download('averaged_perceptron_tagger')
-nltk.download('maxent_ne_chunker')
-nltk.download('words')
-nltk.download('punkt_tab')
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 
 # ============================================================
-# CARGA Y SIMULACIÓN DE COMENTARIOS
+# CONFIGURACIÓN DE LA APP
 # ============================================================
 
-print("📦 Cargando datos procesados...")
-df = pd.read_csv("data/datos_procesados.csv")
-print(f"✅ Datos cargados: {df.shape[0]} filas")
-
-print("\n💬 Generando comentarios simulados de transacciones...")
-
-comentarios_normales = [
-    "pago en supermercado compra semanal",
-    "transferencia a cuenta de ahorros personal",
-    "pago de servicios publicos agua y luz",
-    "compra en restaurante almuerzo de trabajo",
-    "retiro en cajero automatico del banco",
-    "pago de suscripcion mensual streaming",
-    "compra en farmacia medicamentos",
-    "pago de transporte uber viaje al aeropuerto",
-    "compra en tienda ropa temporada",
-    "pago de internet y telefonia hogar",
-]
-
-comentarios_fraude = [
-    "transferencia urgente cuenta desconocida extranjero",
-    "compra sospechosa monto elevado madrugada",
-    "retiro multiple cajero diferente ciudad",
-    "pago no reconocido tarjeta clonada posible",
-    "transaccion extraña horario inusual monto alto",
-    "compra electronica costosa sin historial previo",
-    "transferencia internacional cuenta nueva sin verificar",
-    "movimiento inusual patron diferente usuario",
-    "pago duplicado mismo comercio minutos despues",
-    "actividad nocturna sospechosa monto irregular",
-]
-
-np.random.seed(42)
-comentarios = []
-for _, row in df.iterrows():
-    if row["Class"] == 0:
-        comentarios.append(np.random.choice(comentarios_normales))
-    else:
-        comentarios.append(np.random.choice(comentarios_fraude))
-
-df["comentario"] = comentarios
-print("✅ Comentarios generados")
+st.set_page_config(
+    page_title="Fraudlytics",
+    page_icon="🔍",
+    layout="wide"
+)
 
 # ============================================================
-# BLOQUE A - NLTK: Limpieza y análisis de texto
+# AUTENTICACIÓN
 # ============================================================
 
-print("\n🔤 Procesando texto con NLTK...")
-lemmatizer = WordNetLemmatizer()
-stop_words = set(stopwords.words('spanish'))
+credentials = {
+    "usernames": {
+        "admin": {
+            "name": "Administrador",
+            "password": stauth.Hasher(["admin123"]).generate()[0]
+        },
+        "analista": {
+            "name": "Analista",
+            "password": stauth.Hasher(["analista123"]).generate()[0]
+        }
+    }
+}
 
-def limpiar_texto(texto):
-    tokens = word_tokenize(texto.lower())
-    tokens = [lemmatizer.lemmatize(t) for t in tokens if t.isalpha() and t not in stop_words]
-    return " ".join(tokens)
+authenticator = stauth.Authenticate(
+    credentials,
+    "fraudlytics_cookie",
+    "clave_secreta_fraudlytics",
+    cookie_expiry_days=1
+)
 
-df["comentario_limpio"] = df["comentario"].apply(limpiar_texto)
-print("✅ Texto limpiado y lematizado")
+name, authentication_status, username = authenticator.login("Login - Fraudlytics", "main")
 
-# Análisis de N-gramas
-print("\n📊 Analizando N-gramas más frecuentes...")
-todos_los_tokens = " ".join(df["comentario_limpio"].values).split()
-bigramas = list(ngrams(todos_los_tokens, 2))
-trigramas = list(ngrams(todos_los_tokens, 3))
+if authentication_status == False:
+    st.error("❌ Usuario o contraseña incorrectos")
+    st.stop()
 
-top_bigramas = Counter(bigramas).most_common(5)
-top_trigramas = Counter(trigramas).most_common(5)
+elif authentication_status == None:
+    st.warning("👆 Ingresa tu usuario y contraseña para continuar")
+    st.info("**Usuario:** admin | **Contraseña:** admin123")
+    st.stop()
 
-print(f"✅ Top 5 bigramas: {top_bigramas}")
-print(f"✅ Top 5 trigramas: {top_trigramas}")
+elif authentication_status:
 
-# ============================================================
-# BLOQUE A.2 - NLTK: Extracción de Entidades Nombradas (NER)
-# ============================================================
+    # ============================================================
+    # APP PRINCIPAL
+    # ============================================================
 
-print("\n🔍 Extrayendo entidades nombradas (NER)...")
+    st.sidebar.title(f"👤 Bienvenido, {name}")
+    authenticator.logout("Cerrar sesión", "sidebar")
 
-from nltk import pos_tag, ne_chunk
-from nltk.tree import Tree
+    st.title("🔍 Fraudlytics")
+    st.subheader("Sistema inteligente de detección de fraude en transacciones financieras")
 
-def extraer_entidades(texto):
-    tokens = word_tokenize(texto)
-    tags = pos_tag(tokens)
-    arbol = ne_chunk(tags, binary=False)
-    entidades = []
-    for subarbol in arbol:
-        if isinstance(subarbol, Tree):
-            entidad = " ".join([palabra for palabra, tag in subarbol.leaves()])
-            tipo = subarbol.label()
-            entidades.append((entidad, tipo))
-    return entidades
+    st.sidebar.title("⚙️ Configuración")
+    archivo = st.sidebar.file_uploader("📂 Subir CSV de transacciones", type=["csv"])
 
-# Aplicamos NER a una muestra de comentarios
-muestra_comentarios = df["comentario"].head(20).tolist()
-todas_entidades = []
+    if archivo is not None:
+        df = pd.read_csv(archivo)
+        st.success(f"✅ Archivo cargado: {df.shape[0]} transacciones")
 
-for comentario in muestra_comentarios:
-    entidades = extraer_entidades(comentario)
-    todas_entidades.extend(entidades)
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Resumen",
+            "📈 Visualización",
+            "🤖 Detección de Fraude",
+            "📋 Reporte"
+        ])
 
-if todas_entidades:
-    print(f"✅ Entidades encontradas: {todas_entidades[:10]}")
-else:
-    print("✅ NER aplicado. No se encontraron entidades nombradas en los comentarios simulados.")
-    print("   (Normal, ya que los comentarios son simulados y no contienen nombres propios)")
-# ============================================================
-# BLOQUE B - SKLEARN: TF-IDF y reducción LSA
-# ============================================================
+        with tab1:
+            st.header("📊 Resumen del dataset")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total transacciones", f"{df.shape[0]:,}")
+            if "Class" in df.columns:
+                fraudes = df[df["Class"] == 1].shape[0]
+                normales = df[df["Class"] == 0].shape[0]
+                col2.metric("Transacciones normales", f"{normales:,}")
+                col3.metric("Fraudes", f"{fraudes:,}", delta=f"{fraudes/df.shape[0]:.2%}")
+            st.dataframe(df.head(20))
+            st.dataframe(df.describe())
 
-print("\n🔢 Aplicando TF-IDF...")
-vectorizer = TfidfVectorizer(max_features=500)
-X_tfidf = vectorizer.fit_transform(df["comentario_limpio"])
-print(f"✅ Matriz TF-IDF: {X_tfidf.shape}")
+        with tab2:
+            st.header("📈 Visualización de patrones")
+            if "Class" in df.columns and "Amount" in df.columns:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Distribución de montos")
+                    fig, ax = plt.subplots()
+                    df[df["Class"] == 0]["Amount"].hist(bins=50, ax=ax, color="steelblue", alpha=0.7, label="Normal")
+                    df[df["Class"] == 1]["Amount"].hist(bins=50, ax=ax, color="red", alpha=0.7, label="Fraude")
+                    ax.legend()
+                    st.pyplot(fig)
+                with col2:
+                    st.subheader("Conteo de transacciones")
+                    fig, ax = plt.subplots()
+                    counts = df["Class"].value_counts()
+                    ax.bar(["Normal", "Fraude"], counts.values, color=["steelblue", "red"])
+                    st.pyplot(fig)
 
-print("\n📉 Reduciendo dimensionalidad con LSA (TruncatedSVD)...")
-lsa = TruncatedSVD(n_components=50, random_state=42)
-X_lsa = lsa.fit_transform(X_tfidf)
-print(f"✅ Matriz LSA reducida a: {X_lsa.shape}")
-print(f"✅ Varianza explicada: {lsa.explained_variance_ratio_.sum():.2%}")
+        with tab3:
+            st.header("🤖 Detección de Fraude")
+            if "Class" in df.columns:
+                features = [col for col in df.columns if col.startswith("V")]
+                if len(features) > 0:
+                    from sklearn.metrics import (
+                        f1_score, precision_score, recall_score,
+                        confusion_matrix, roc_auc_score, precision_recall_curve
+                    )
+                    from xgboost import XGBClassifier
 
-# ============================================================
-# GUARDADO
-# ============================================================
+                    algoritmo = st.selectbox(
+                        "🤖 Elige el algoritmo:",
+                        ["Regresión Logística", "XGBoost"]
+                    )
 
-print("\n💾 Guardando resultados...")
-df_lsa = pd.DataFrame(X_lsa, columns=[f"lsa_{i}" for i in range(50)])
-df_final = pd.concat([df.reset_index(drop=True), df_lsa], axis=1)
-df_final.to_csv("data/datos_con_texto.csv", index=False)
-print("✅ Guardado en data/datos_con_texto.csv")
+                    X = df[features].values
+                    y = df["Class"].values
+                    scaler = StandardScaler()
+                    X_scaled = scaler.fit_transform(X)
 
-print("\n🎉 Paso 3 completado exitosamente!")
+                    if algoritmo == "Regresión Logística":
+                        modelo = LogisticRegression(max_iter=1000, class_weight="balanced")
+                    else:
+                        modelo = XGBClassifier(
+                            scale_pos_weight=len(y[y==0])/len(y[y==1]),
+                            n_estimators=100,
+                            max_depth=6,
+                            learning_rate=0.1,
+                            random_state=42,
+                            eval_metric="logloss"
+                        )
+
+                    modelo.fit(X_scaled, y)
+                    df["probabilidad_fraude"] = modelo.predict_proba(X_scaled)[:, 1]
+                    df["prediccion"] = modelo.predict(X_scaled)
+
+                    st.success("✅ Modelo entrenado")
+
+                    f1 = f1_score(y, df["prediccion"])
+                    precision = precision_score(y, df["prediccion"])
