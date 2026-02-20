@@ -99,6 +99,40 @@ print(f"✅ Top 5 bigramas: {top_bigramas}")
 print(f"✅ Top 5 trigramas: {top_trigramas}")
 
 # ============================================================
+# BLOQUE A.2 - NLTK: Extracción de Entidades Nombradas (NER)
+# ============================================================
+
+print("\n🔍 Extrayendo entidades nombradas (NER)...")
+
+from nltk import pos_tag, ne_chunk
+from nltk.tree import Tree
+
+def extraer_entidades(texto):
+    tokens = word_tokenize(texto)
+    tags = pos_tag(tokens)
+    arbol = ne_chunk(tags, binary=False)
+    entidades = []
+    for subarbol in arbol:
+        if isinstance(subarbol, Tree):
+            entidad = " ".join([palabra for palabra, tag in subarbol.leaves()])
+            tipo = subarbol.label()
+            entidades.append((entidad, tipo))
+    return entidades
+
+# Aplicamos NER a una muestra de comentarios
+muestra_comentarios = df["comentario"].head(20).tolist()
+todas_entidades = []
+
+for comentario in muestra_comentarios:
+    entidades = extraer_entidades(comentario)
+    todas_entidades.extend(entidades)
+
+if todas_entidades:
+    print(f"✅ Entidades encontradas: {todas_entidades[:10]}")
+else:
+    print("✅ NER aplicado. No se encontraron entidades nombradas en los comentarios simulados.")
+    print("   (Normal, ya que los comentarios son simulados y no contienen nombres propios)")
+# ============================================================
 # BLOQUE B - SKLEARN: TF-IDF y reducción LSA
 # ============================================================
 
