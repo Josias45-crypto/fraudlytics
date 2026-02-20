@@ -29,7 +29,7 @@ st.subheader("Sistema inteligente de detección de fraude en transacciones finan
 # ============================================================
 
 st.sidebar.title("⚙️ Configuración")
-st.sidebar.markdown("Sube tu archivo de transacciones para analizarlo.")
+st.sidebar.markdown("Subír.")
 
 archivo = st.sidebar.file_uploader("📂 Subir CSV de transacciones", type=["csv"])
 
@@ -127,18 +127,90 @@ if archivo is not None:
                 scaler = StandardScaler()
                 X_scaled = scaler.fit_transform(X)
 
-                modelo = LogisticRegression(max_iter=1000, class_weight="balanced")
-                modelo.fit(X_scaled, y)
+                # Selector de modelo
+                algoritmo = st.selectbox(
+                    "🤖 Elige el algoritmo de detección:",
+                    ["Regresión Logística", "XGBoost"]
+                )
+
+                if algoritmo == "Regresión Logística":
+                    modelo = LogisticRegression(max_iter=1000, class_weight="balanced")
+                    modelo.fit(X_scaled, y)
+                else:
+                    from xgboost import XGBClassifier
+                    modelo = XGBClassifier(
+                        scale_pos_weight=len(y[y==0])/len(y[y==1]),
+                        n_estimators=100,
+                        max_depth=6,
+                        learning_rate=0.1,
+                        random_state=42,
+                        eval_metric="logloss"
+                    )
+                    modelo.fit(X_scaled, y)
 
                 df["probabilidad_fraude"] = modelo.predict_proba(X_scaled)[:, 1]
                 df["prediccion"] = modelo.predict(X_scaled)
 
                 st.success("✅ Modelo entrenado correctamente")
 
+                # Métricas principales
+                from sklearn.metrics import (
+                    f1_score, precision_score, recall_score,
+                    confusion_matrix, roc_auc_score
+                )
+
+                f1 = f1_score(y, df["prediccion"])
+                precision = precision_score(y, df["prediccion"])
+                recall = recall_score(y, df["prediccion"])
+                roc = roc_auc_score(y, df["probabilidad_fraude"])
+                accuracy = (df["prediccion"] == y).mean()
+
+                st.subheader("📊 Métricas del modelo")
+                col1, col2, col3, col4, col5 = st.columns(5)
+                col1.metric("Accuracy", f"{accuracy:.2%}")
+                col2.metric("Precisión", f"{precision:.2%}", 
+                           help="De los fraudes detectados, ¿cuántos eran reales?")
+                col3.metric("Recall", f"{recall:.2%}",
+                           help="De todos los fraudes reales, ¿cuántos detectó?")
+                col4.metric("F1-Score", f"{f1:.2%}",
+                           help="Equilibrio entre Precisión y Recall")
+                col5.metric("ROC-AUC", f"{roc:.2%}",
+                           help="Qué tan bien separa fraudes de normales")
+
+                # Interpretación automática
+                st.subheader("🧠 Interpretación")
+                if recall < 0.7:
+                    st.warning("⚠️ El modelo está dejando pasar muchos fraudes. Considera reentrenar con más datos.")
+                elif precision < 0.7:
+                    st.warning("⚠️ El modelo está marcando demasiadas transacciones normales como fraude.")
+                else:
+                    st.success("✅ El modelo tiene un buen balance entre precisión y recall.")
+
+                # Matriz de confusión
                 col1, col2 = st.columns(2)
-                fraudes_detectados = df[df["prediccion"] == 1].shape[0]
-                col1.metric("Fraudes detectados", fraudes_detectados)
-                col2.metric("Precisión del modelo", f"{(df['prediccion'] == df['Class']).mean():.2%}")
+
+                with col1:
+                    st.subheader("Matriz de Confusión")
+                    cm = confusion_matrix(y, df["prediccion"])
+                    fig, ax = plt.subplots(figsize=(5, 4))
+                    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+                                xticklabels=["Normal", "Fraude"],
+                                yticklabels=["Normal", "Fraude"], ax=ax)
+                    ax.set_ylabel("Real")
+                    ax.set_xlabel("Predicho")
+                    st.pyplot(fig)
+
+                with col2:
+                    st.subheader("Curva Precision-Recall")
+                    from sklearn.metrics import precision_recall_curve
+                    precision_curve, recall_curve, _ = precision_recall_curve(y, df["probabilidad_fraude"])
+                    fig, ax = plt.subplots(figsize=(5, 4))
+                    ax.plot(recall_curve, precision_curve, color="blue", lw=2)
+                    ax.fill_between(recall_curve, precision_curve, alpha=0.2, color="blue")
+                    ax.set_xlabel("Recall")
+                    ax.set_ylabel("Precision")
+                    ax.set_title("Curva Precision-Recall")
+                    st.pyplot(fig)
 
                 st.subheader("Transacciones sospechosas detectadas")
                 sospechosas = df[df["prediccion"] == 1][["Amount", "probabilidad_fraude", "Class"]].sort_values(

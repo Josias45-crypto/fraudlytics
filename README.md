@@ -11,6 +11,7 @@ como en los comentarios de los usuarios.
 - Procesa comentarios de texto y los convierte en datos para la IA
 - Entrena un modelo multimodal que combina datos numéricos y texto
 - Valida el modelo con métricas especializadas para datasets desbalanceados
+- Interfaz web para analizar transacciones sin tocar la terminal
 
 ## 🧱 Pipeline del sistema
 | Paso | Archivo | Tecnologías |
@@ -20,6 +21,7 @@ como en los comentarios de los usuarios.
 | 3 - Procesamiento de texto | `src/paso3_texto.py` | NLTK, Scikit-learn |
 | 4 - Modelo de IA | `src/paso4_modelo.py` | TensorFlow/Keras, PyTorch |
 | 5 - Validación | `src/paso5_validacion.py` | Scikit-learn |
+| App web | `app/main.py` | Streamlit |
 
 ## 🛠️ Instalación
 
@@ -43,13 +45,17 @@ source venv/bin/activate
 ### 3. Instala las dependencias
 ```bash
 pip install -r requirements.txt
+pip install torch
 ```
 
 ### 4. Descarga el dataset
-Ve a kaggle.com/datasets/mlg-ulb/creditcardfraud, descarga el archivo 
-`creditcard.csv` y colócalo dentro de la carpeta `data/`.
+- Ve a kaggle.com/datasets/mlg-ulb/creditcardfraud
+- Descarga el archivo `creditcard.csv`
+- Colócalo dentro de la carpeta `data/`
 
 ## ▶️ Uso
+
+### Correr el pipeline completo
 Ejecuta los pasos en orden desde la raíz del proyecto:
 ```bash
 python src/paso1_preparacion.py
@@ -57,6 +63,32 @@ python src/paso2_visualizacion.py
 python src/paso3_texto.py
 python src/paso4_modelo.py
 python src/paso5_validacion.py
+```
+⚠️ Cierra las ventanas de gráficas cuando aparezcan para que el programa continúe.
+
+### Correr la interfaz web
+```bash
+streamlit run app/main.py
+```
+Se abrirá automáticamente en tu navegador. Sube el archivo `creditcard.csv` 
+desde el panel izquierdo y explora las 4 pestañas.
+
+## 📁 Estructura del proyecto
+```
+fraudlytics/
+├── app/
+│   └── main.py
+├── data/
+│   └── creditcard.csv
+├── notebooks/
+├── src/
+│   ├── paso1_preparacion.py
+│   ├── paso2_visualizacion.py
+│   ├── paso3_texto.py
+│   ├── paso4_modelo.py
+│   └── paso5_validacion.py
+├── requirements.txt
+└── README.md
 ```
 
 ## 📊 Dataset
@@ -71,3 +103,4 @@ python src/paso5_validacion.py
 - NLTK, Scikit-learn
 - TensorFlow/Keras
 - PyTorch
+- Streamlit
