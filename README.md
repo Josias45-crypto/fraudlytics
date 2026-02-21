@@ -1,17 +1,26 @@
 # 🔍 Fraudlytics
-Sistema inteligente de análisis y detección de fraude en transacciones financieras.
+Sistema inteligente de detección de fraude en transacciones financieras para uso empresarial.
 
-Combina análisis numérico y procesamiento de lenguaje natural para identificar 
-transacciones sospechosas, aprendiendo patrones tanto en montos, fechas y categorías 
-como en los comentarios de los usuarios.
+Combina análisis numérico, procesamiento de lenguaje natural y modelos de Machine Learning 
+avanzados para identificar transacciones sospechosas con alta precisión.
 
 ## 🚀 ¿Qué hace este sistema?
 - Limpia y prepara datos históricos de transacciones financieras
 - Visualiza patrones de comportamiento normal vs fraudulento
 - Procesa comentarios de texto y los convierte en datos para la IA
 - Entrena un modelo multimodal que combina datos numéricos y texto
+- Optimiza el modelo con SMOTE, XGBoost y ajuste de umbral para producción
 - Valida el modelo con métricas especializadas para datasets desbalanceados
-- Interfaz web para analizar transacciones sin tocar la terminal
+- Interfaz web con login, registro y análisis en tiempo real
+
+## 📊 Rendimiento del modelo en producción
+| Métrica | Valor |
+|---------|-------|
+| ROC-AUC | 94.9% |
+| Recall | 71.4% |
+| Precision | 53.2% |
+| Umbral óptimo | 0.70 |
+| Dataset de entrenamiento | 590,540 transacciones reales |
 
 ## 🧱 Pipeline del sistema
 | Paso | Archivo | Tecnologías |
@@ -21,6 +30,8 @@ como en los comentarios de los usuarios.
 | 3 - Procesamiento de texto | `src/paso3_texto.py` | NLTK, Scikit-learn |
 | 4 - Modelo de IA | `src/paso4_modelo.py` | TensorFlow/Keras, PyTorch |
 | 5 - Validación | `src/paso5_validacion.py` | Scikit-learn |
+| Entrenamiento producción | `src/entrenar_ieee.py` | XGBoost, IEEE-CIS |
+| Optimización umbral | `src/ajustar_umbral.py` | Scikit-learn |
 | App web | `app/main.py` | Streamlit |
 
 ## 🛠️ Instalación
@@ -48,15 +59,19 @@ pip install -r requirements.txt
 pip install torch
 ```
 
-### 4. Descarga el dataset
+### 4. Descarga los datasets
+**Dataset base (pipeline de aprendizaje):**
 - Ve a kaggle.com/datasets/mlg-ulb/creditcardfraud
-- Descarga el archivo `creditcard.csv`
-- Colócalo dentro de la carpeta `data/`
+- Descarga `creditcard.csv` y ponlo en `data/`
+
+**Dataset de producción (modelo real):**
+- Ve a kaggle.com/competitions/ieee-fraud-detection/data
+- Acepta las reglas de la competencia
+- Descarga `train_transaction.csv` y `train_identity.csv` y ponlos en `data/`
 
 ## ▶️ Uso
 
-### Correr el pipeline completo
-Ejecuta los pasos en orden desde la raíz del proyecto:
+### Correr el pipeline completo de aprendizaje
 ```bash
 python src/paso1_preparacion.py
 python src/paso2_visualizacion.py
@@ -66,35 +81,51 @@ python src/paso5_validacion.py
 ```
 ⚠️ Cierra las ventanas de gráficas cuando aparezcan para que el programa continúe.
 
+### Entrenar el modelo de producción
+```bash
+python src/entrenar_ieee.py
+python src/ajustar_umbral.py
+```
+
 ### Correr la interfaz web
 ```bash
 streamlit run app/main.py
 ```
-Se abrirá automáticamente en tu navegador. Sube el archivo `creditcard.csv` 
-desde el panel izquierdo y explora las 4 pestañas.
+Se abrirá en tu navegador. Credenciales por defecto: **admin / admin123**
 
 ## 📁 Estructura del proyecto
 ```
 fraudlytics/
 ├── app/
-│   └── main.py
+│   ├── main.py
+│   └── users.json
 ├── data/
-│   └── creditcard.csv
+│   ├── creditcard.csv
+│   ├── train_transaction.csv
+│   ├── train_identity.csv
+│   └── modelo_produccion.pkl
 ├── notebooks/
 ├── src/
 │   ├── paso1_preparacion.py
 │   ├── paso2_visualizacion.py
 │   ├── paso3_texto.py
 │   ├── paso4_modelo.py
-│   └── paso5_validacion.py
+│   ├── paso5_validacion.py
+│   ├── entrenar_modelo.py
+│   ├── entrenar_ieee.py
+│   ├── optimizar_modelo.py
+│   ├── modelo_produccion_final.py
+│   ├── evaluar_modelo.py
+│   └── ajustar_umbral.py
 ├── requirements.txt
 └── README.md
 ```
 
-## 📊 Dataset
-- **Fuente:** Credit Card Fraud Detection - Kaggle (mlg-ulb)
-- **Tamaño:** 284,807 transacciones
-- **Balance:** 99.8% normales | 0.2% fraudes
+## 📊 Datasets
+| Dataset | Fuente | Transacciones | Fraudes |
+|---------|--------|--------------|---------|
+| Credit Card Fraud | Kaggle (mlg-ulb) | 284,807 | 0.17% |
+| IEEE-CIS Fraud Detection | Kaggle (IEEE) | 590,540 | 3.50% |
 
 ## 🧰 Tecnologías
 - Python 3.12
@@ -103,4 +134,6 @@ fraudlytics/
 - NLTK, Scikit-learn
 - TensorFlow/Keras
 - PyTorch
+- XGBoost
 - Streamlit
+- bcrypt
