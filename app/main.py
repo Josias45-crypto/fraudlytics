@@ -1,7 +1,8 @@
 # ============================================================
-# FRAUDLYTICS - Interfaz Web con Login y Registro simple
+# FRAUDLYTICS - Interfaz Web con Login y Registro
 # ============================================================
 
+import pickle
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -12,6 +13,11 @@ import os
 import bcrypt
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    f1_score, precision_score, recall_score,
+    confusion_matrix, roc_auc_score, precision_recall_curve
+)
+from xgboost import XGBClassifier
 
 # ============================================================
 # CONFIGURACIÓN
@@ -86,7 +92,6 @@ if not st.session_state.autenticado:
 
         usuarios = cargar_usuarios()
 
-        # LOGIN
         if st.session_state.modo == "login":
             st.subheader("Iniciar sesión")
             usuario = st.text_input("🆔 Usuario")
@@ -106,7 +111,6 @@ if not st.session_state.autenticado:
 
             st.caption("Usuario de prueba: **admin** | Contraseña: **admin123**")
 
-        # REGISTRO
         elif st.session_state.modo == "registro":
             st.subheader("Crear cuenta nueva")
             nombre = st.text_input("👤 Nombre completo")
@@ -153,12 +157,43 @@ else:
     st.title("🔍 Fraudlytics")
     st.subheader("Sistema inteligente de detección de fraude en transacciones financieras")
 
+    # Sidebar con plantilla y uploader
     st.sidebar.title("⚙️ Configuración")
+
+    if os.path.exists("data/plantilla_fraudlytics.xlsx"):
+        with open("data/plantilla_fraudlytics.xlsx", "rb") as f:
+            st.sidebar.download_button(
+                label="⬇️ Descargar plantilla Excel",
+                data=f,
+                file_name="plantilla_fraudlytics.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Descarga la plantilla Excel con el formato correcto"
+        )
+        st.sidebar.divider()
+
     archivo = st.sidebar.file_uploader("📂 Subir CSV de transacciones", type=["csv"])
 
     if archivo is not None:
+
         df = pd.read_csv(archivo)
-        st.success(f"✅ Archivo cargado: {df.shape[0]} transacciones")
+
+        # Cargar features del modelo
+        with open("data/features_produccion.pkl", "rb") as f:
+            features_modelo = pickle.load(f)
+
+        # Validar columnas
+        columnas_disponibles = [c for c in features_modelo if c in df.columns]
+        columnas_faltantes = [c for c in features_modelo if c not in df.columns]
+
+        if len(columnas_disponibles) < 50:
+            st.error("❌ El CSV no tiene el formato correcto para el modelo de producción.")
+            st.warning(f"Faltan {len(columnas_faltantes)} columnas.")
+            st.info("👈 Descarga la plantilla desde el panel izquierdo para ver el formato correcto.")
+            with st.expander("Ver primeras 10 columnas faltantes"):
+                st.write(columnas_faltantes[:10])
+            st.stop()
+
+        st.success(f"✅ Archivo cargado: {df.shape[0]:,} transacciones")
 
         tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Resumen",
@@ -171,7 +206,12 @@ else:
             st.header("📊 Resumen del dataset")
             col1, col2, col3 = st.columns(3)
             col1.metric("Total transacciones", f"{df.shape[0]:,}")
-            if "Class" in df.columns:
+            if "isFraud" in df.columns:
+                fraudes = df[df["isFraud"] == 1].shape[0]
+                normales = df[df["isFraud"] == 0].shape[0]
+                col2.metric("Transacciones normales", f"{normales:,}")
+                col3.metric("Fraudes", f"{fraudes:,}", delta=f"{fraudes/df.shape[0]:.2%}")
+            elif "Class" in df.columns:
                 fraudes = df[df["Class"] == 1].shape[0]
                 normales = df[df["Class"] == 0].shape[0]
                 col2.metric("Transacciones normales", f"{normales:,}")
@@ -181,101 +221,101 @@ else:
 
         with tab2:
             st.header("📈 Visualización de patrones")
-            if "Class" in df.columns and "Amount" in df.columns:
+            col_monto = "TransactionAmt" if "TransactionAmt" in df.columns else "Amount" if "Amount" in df.columns else None
+            col_target = "isFraud" if "isFraud" in df.columns else "Class" if "Class" in df.columns else None
+
+            if col_monto and col_target:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.subheader("Distribución de montos")
                     fig, ax = plt.subplots()
-                    df[df["Class"] == 0]["Amount"].hist(bins=50, ax=ax, color="steelblue", alpha=0.7, label="Normal")
-                    df[df["Class"] == 1]["Amount"].hist(bins=50, ax=ax, color="red", alpha=0.7, label="Fraude")
+                    df[df[col_target] == 0][col_monto].hist(bins=50, ax=ax, color="steelblue", alpha=0.7, label="Normal")
+                    df[df[col_target] == 1][col_monto].hist(bins=50, ax=ax, color="red", alpha=0.7, label="Fraude")
                     ax.legend()
                     st.pyplot(fig)
                 with col2:
                     st.subheader("Conteo de transacciones")
                     fig, ax = plt.subplots()
-                    counts = df["Class"].value_counts()
+                    counts = df[col_target].value_counts()
                     ax.bar(["Normal", "Fraude"], counts.values, color=["steelblue", "red"])
                     st.pyplot(fig)
 
         with tab3:
             st.header("🤖 Detección de Fraude")
-            if "Class" in df.columns:
-                features = [col for col in df.columns if col.startswith("V")]
-                if len(features) > 0:
-                    from sklearn.metrics import (
-                        f1_score, precision_score, recall_score,
-                        confusion_matrix, roc_auc_score, precision_recall_curve
-                    )
-                    from xgboost import XGBClassifier
 
-                    algoritmo = st.selectbox(
-                        "🤖 Elige el algoritmo:",
-                        ["Regresión Logística", "XGBoost"]
-                    )
+            # Cargar modelo de producción
+            with open("data/modelo_produccion.pkl", "rb") as f:
+                modelo = pickle.load(f)
+            with open("data/scaler_produccion.pkl", "rb") as f:
+                scaler_prod = pickle.load(f)
+            with open("data/umbral_produccion.pkl", "rb") as f:
+                umbral = pickle.load(f)
 
-                    X = df[features].values
-                    y = df["Class"].values
-                    scaler = StandardScaler()
-                    X_scaled = scaler.fit_transform(X)
+            st.info(f"🏭 Usando modelo de producción IEEE-CIS | Umbral: {umbral:.2f} | ROC-AUC: 94.9%")
 
-                    if algoritmo == "Regresión Logística":
-                        modelo = LogisticRegression(max_iter=1000, class_weight="balanced")
-                    else:
-                        modelo = XGBClassifier(
-                            scale_pos_weight=len(y[y==0])/len(y[y==1]),
-                            n_estimators=100,
-                            max_depth=6,
-                            learning_rate=0.1,
-                            random_state=42,
-                            eval_metric="logloss"
-                        )
+            # Preparar datos con las features del modelo
+            X_prod = np.zeros((len(df), len(features_modelo)))
+            for i, feat in enumerate(features_modelo):
+                if feat in df.columns:
+                    X_prod[:, i] = pd.to_numeric(df[feat], errors="coerce").fillna(0).values
 
-                    modelo.fit(X_scaled, y)
-                    df["probabilidad_fraude"] = modelo.predict_proba(X_scaled)[:, 1]
-                    df["prediccion"] = modelo.predict(X_scaled)
+            X_prod_scaled = scaler_prod.transform(X_prod)
+            df["probabilidad_fraude"] = modelo.predict_proba(X_prod_scaled)[:, 1]
+            df["prediccion"] = (df["probabilidad_fraude"] >= umbral).astype(int)
 
-                    st.success("✅ Modelo entrenado")
+            st.success("✅ Análisis completado")
 
-                    f1 = f1_score(y, df["prediccion"])
-                    precision = precision_score(y, df["prediccion"])
-                    recall = recall_score(y, df["prediccion"])
-                    roc = roc_auc_score(y, df["probabilidad_fraude"])
-                    accuracy = (df["prediccion"] == y).mean()
+            # Métricas si hay columna target
+            col_target = "isFraud" if "isFraud" in df.columns else "Class" if "Class" in df.columns else None
 
-                    col1, col2, col3, col4, col5 = st.columns(5)
-                    col1.metric("Accuracy", f"{accuracy:.2%}")
-                    col2.metric("Precisión", f"{precision:.2%}")
-                    col3.metric("Recall", f"{recall:.2%}")
-                    col4.metric("F1-Score", f"{f1:.2%}")
-                    col5.metric("ROC-AUC", f"{roc:.2%}")
+            if col_target:
+                y = df[col_target].values
+                f1 = f1_score(y, df["prediccion"])
+                precision = precision_score(y, df["prediccion"], zero_division=0)
+                recall = recall_score(y, df["prediccion"])
+                roc = roc_auc_score(y, df["probabilidad_fraude"])
+                accuracy = (df["prediccion"] == y).mean()
 
-                    if recall < 0.7:
-                        st.warning("⚠️ El modelo está dejando pasar muchos fraudes.")
-                    elif precision < 0.7:
-                        st.warning("⚠️ El modelo está marcando demasiadas transacciones normales como fraude.")
-                    else:
-                        st.success("✅ El modelo tiene un buen balance.")
+                col1, col2, col3, col4, col5 = st.columns(5)
+                col1.metric("Accuracy", f"{accuracy:.2%}")
+                col2.metric("Precisión", f"{precision:.2%}")
+                col3.metric("Recall", f"{recall:.2%}")
+                col4.metric("F1-Score", f"{f1:.2%}")
+                col5.metric("ROC-AUC", f"{roc:.2%}")
 
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.subheader("Matriz de Confusión")
-                        cm = confusion_matrix(y, df["prediccion"])
-                        fig, ax = plt.subplots(figsize=(5, 4))
-                        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-                                    xticklabels=["Normal", "Fraude"],
-                                    yticklabels=["Normal", "Fraude"], ax=ax)
-                        st.pyplot(fig)
-                    with col2:
-                        st.subheader("Curva Precision-Recall")
-                        p_curve, r_curve, _ = precision_recall_curve(y, df["probabilidad_fraude"])
-                        fig, ax = plt.subplots(figsize=(5, 4))
-                        ax.plot(r_curve, p_curve, color="blue", lw=2)
-                        ax.fill_between(r_curve, p_curve, alpha=0.2, color="blue")
-                        st.pyplot(fig)
+                if recall < 0.7:
+                    st.warning("⚠️ El modelo está dejando pasar muchos fraudes.")
+                elif precision < 0.7:
+                    st.warning("⚠️ El modelo está marcando demasiadas transacciones normales como fraude.")
+                else:
+                    st.success("✅ El modelo tiene un buen balance.")
 
-                    st.subheader("Transacciones sospechosas")
-                    st.dataframe(df[df["prediccion"] == 1][["Amount", "probabilidad_fraude", "Class"]].sort_values(
-                        "probabilidad_fraude", ascending=False))
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Matriz de Confusión")
+                    cm = confusion_matrix(y, df["prediccion"])
+                    fig, ax = plt.subplots(figsize=(5, 4))
+                    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+                                xticklabels=["Normal", "Fraude"],
+                                yticklabels=["Normal", "Fraude"], ax=ax)
+                    st.pyplot(fig)
+                with col2:
+                    st.subheader("Curva Precision-Recall")
+                    p_curve, r_curve, _ = precision_recall_curve(y, df["probabilidad_fraude"])
+                    fig, ax = plt.subplots(figsize=(5, 4))
+                    ax.plot(r_curve, p_curve, color="blue", lw=2)
+                    ax.fill_between(r_curve, p_curve, alpha=0.2, color="blue")
+                    st.pyplot(fig)
+
+            fraudes_detectados = df[df["prediccion"] == 1].shape[0]
+            st.subheader(f"🚨 Transacciones sospechosas detectadas: {fraudes_detectados}")
+            cols_mostrar = ["probabilidad_fraude", "prediccion"]
+            if "TransactionAmt" in df.columns:
+                cols_mostrar = ["TransactionAmt"] + cols_mostrar
+            elif "Amount" in df.columns:
+                cols_mostrar = ["Amount"] + cols_mostrar
+            st.dataframe(df[df["prediccion"] == 1][cols_mostrar].sort_values(
+                "probabilidad_fraude", ascending=False))
 
         with tab4:
             st.header("📋 Reporte")
@@ -292,3 +332,10 @@ else:
 
     else:
         st.info("👈 Sube un archivo CSV para comenzar.")
+        st.markdown("""
+        ### ¿Cómo usar Fraudlytics?
+        1. **Descarga la plantilla** desde el panel izquierdo para ver el formato correcto
+        2. **Prepara tu CSV** con el mismo formato que la plantilla
+        3. **Sube tu CSV** y el modelo analizará automáticamente las transacciones
+        4. **Revisa los resultados** en las pestañas de detección y reporte
+        """)
