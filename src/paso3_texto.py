@@ -1,156 +1,185 @@
 # ============================================================
-# FRAUDLYTICS - Interfaz Web con Autenticación
-# Streamlit + Streamlit Authenticator
+# FRAUDLYTICS - PASO 3: Procesamiento de Lenguaje Natural
+# NLTK + Scikit-learn: N-gramas, TF-IDF, LSA
+# Adaptado al dataset bancario con comentarios de transacciones
 # ============================================================
 
-import streamlit as st
-import streamlit_authenticator as stauth
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
+import nltk
+import pickle
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import TruncatedSVD
+from scipy.sparse import save_npz
+
+# Descargar recursos NLTK
+nltk.download("punkt", quiet=True)
+nltk.download("stopwords", quiet=True)
+nltk.download("averaged_perceptron_tagger", quiet=True)
+nltk.download("maxent_ne_chunker", quiet=True)
+nltk.download("words", quiet=True)
+nltk.download("punkt_tab", quiet=True)
+
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.util import ngrams
 
 # ============================================================
-# CONFIGURACIÓN DE LA APP
+# CARGAR DATASET
 # ============================================================
 
-st.set_page_config(
-    page_title="Fraudlytics",
-    page_icon="🔍",
-    layout="wide"
+print("📦 Cargando creditcard.csv...")
+df = pd.read_csv("data/creditcard.csv")
+print(f"✅ Dataset: {df.shape[0]} transacciones")
+
+# ============================================================
+# GENERAR COMENTARIOS SINTÉTICOS REALISTAS
+# ============================================================
+
+print("\n📝 Generando comentarios de transacciones...")
+np.random.seed(42)
+
+comentarios_normal = [
+    "pago supermercado compra semanal productos básicos",
+    "retiro cajero automático banco central dinero efectivo",
+    "transferencia pago arriendo mensual apartamento",
+    "compra farmacia medicamentos receta médica",
+    "pago servicio internet mensual proveedor hogar",
+    "compra restaurante almuerzo ejecutivo centro comercial",
+    "pago tarjeta crédito cuota mensual banco",
+    "compra gasolina estación servicio combustible vehículo",
+    "transferencia pago nómina empleados empresa",
+    "compra ropa tienda descuento temporada",
+]
+
+comentarios_fraude = [
+    "transferencia urgente cuenta extranjera desconocida madrugada",
+    "retiro múltiple cajero límite máximo horario inusual",
+    "compra electrónica costosa tienda online desconocida extranjero",
+    "transferencia internacional cuenta nueva sin historial",
+    "pago sospechoso monto elevado horario nocturno inusual",
+    "retiro efectivo máximo cuenta nueva cliente reciente",
+    "compra lujo tarjeta recién activada monto alto",
+    "transferencia rápida múltiples cuentas diferentes países",
+    "operación duplicada misma cuenta diferentes ciudades simultáneas",
+    "compra en línea datos tarjeta nueva sin verificación",
+]
+
+comentarios = []
+for i, row in df.iterrows():
+    if row["Class"] == 1:
+        comentarios.append(np.random.choice(comentarios_fraude))
+    else:
+        comentarios.append(np.random.choice(comentarios_normal))
+
+df["comentario"] = comentarios
+print(f"✅ Comentarios generados: {len(comentarios)}")
+
+# ============================================================
+# LIMPIEZA Y ANÁLISIS DE TEXTO
+# ============================================================
+
+print("\n🔍 Procesando texto con NLTK...")
+stop_words = set(stopwords.words("spanish"))
+
+def limpiar_texto(texto):
+    tokens = word_tokenize(texto.lower())
+    tokens = [t for t in tokens if t.isalpha() and t not in stop_words]
+    return " ".join(tokens)
+
+df["texto_limpio"] = df["comentario"].apply(limpiar_texto)
+
+# Análisis de N-gramas
+print("\n📊 Análisis de N-gramas (bigramas y trigramas)...")
+todos_tokens = " ".join(df["texto_limpio"]).split()
+
+bigramas = list(ngrams(todos_tokens, 2))
+trigramas = list(ngrams(todos_tokens, 3))
+
+from collections import Counter
+top_bigramas = Counter(bigramas).most_common(10)
+top_trigramas = Counter(trigramas).most_common(10)
+
+print("\nTop 10 Bigramas:")
+for bg, count in top_bigramas:
+    print(f"  {' '.join(bg)}: {count}")
+
+print("\nTop 10 Trigramas:")
+for tg, count in top_trigramas:
+    print(f"  {' '.join(tg)}: {count}")
+
+# Detección de entidades (NER) en muestra
+print("\n🏷️ Análisis NER en muestra de comentarios...")
+muestra = df["comentario"].head(10).tolist()
+for texto in muestra[:3]:
+    tokens = word_tokenize(texto)
+    pos_tags = nltk.pos_tag(tokens)
+    entidades = nltk.ne_chunk(pos_tags, binary=False)
+    print(f"  Texto: {texto[:50]}...")
+    for chunk in entidades:
+        if hasattr(chunk, "label"):
+            print(f"    Entidad [{chunk.label()}]: {' '.join(c[0] for c in chunk)}")
+
+# ============================================================
+# TF-IDF CON MATRIZ DISPERSA
+# ============================================================
+
+print("\n⚡ Aplicando TF-IDF con N-gramas (1,2,3)...")
+tfidf = TfidfVectorizer(
+    ngram_range=(1, 3),
+    max_features=5000,
+    min_df=2,
+    sublinear_tf=True
 )
 
+X_tfidf = tfidf.fit_transform(df["texto_limpio"])
+print(f"✅ Matriz TF-IDF dispersa: {X_tfidf.shape}")
+print(f"   Densidad: {X_tfidf.nnz / (X_tfidf.shape[0] * X_tfidf.shape[1]):.4%}")
+
 # ============================================================
-# AUTENTICACIÓN
+# TRUNCATED SVD - LSA (50 dimensiones)
 # ============================================================
 
-credentials = {
-    "usernames": {
-        "admin": {
-            "name": "Administrador",
-            "password": stauth.Hasher(["admin123"]).generate()[0]
-        },
-        "analista": {
-            "name": "Analista",
-            "password": stauth.Hasher(["analista123"]).generate()[0]
-        }
-    }
-}
+print("\n🔬 Aplicando Truncated SVD (LSA) - 50 dimensiones...")
+svd = TruncatedSVD(n_components=50, random_state=42)
+X_lsa = svd.fit_transform(X_tfidf)
 
-authenticator = stauth.Authenticate(
-    credentials,
-    "fraudlytics_cookie",
-    "clave_secreta_fraudlytics",
-    cookie_expiry_days=1
-)
+varianza_explicada = svd.explained_variance_ratio_.sum()
+print(f"✅ LSA completado: {X_lsa.shape}")
+print(f"   Varianza explicada por 50 componentes: {varianza_explicada:.2%}")
 
-name, authentication_status, username = authenticator.login("Login - Fraudlytics", "main")
+# ============================================================
+# GUARDAR RESULTADOS
+# ============================================================
 
-if authentication_status == False:
-    st.error("❌ Usuario o contraseña incorrectos")
-    st.stop()
+print("\n💾 Guardando resultados...")
 
-elif authentication_status == None:
-    st.warning("👆 Ingresa tu usuario y contraseña para continuar")
-    st.info("**Usuario:** admin | **Contraseña:** admin123")
-    st.stop()
+# Agregar columnas LSA al dataframe
+lsa_cols = [f"lsa_{i}" for i in range(50)]
+df_lsa = pd.DataFrame(X_lsa, columns=lsa_cols)
+df_final = pd.concat([df.reset_index(drop=True), df_lsa], axis=1)
+df_final.to_csv("data/datos_con_texto.csv", index=False)
 
-elif authentication_status:
+# Guardar modelos
+with open("data/tfidf_vectorizer.pkl", "wb") as f:
+    pickle.dump(tfidf, f)
+with open("data/svd_lsa.pkl", "wb") as f:
+    pickle.dump(svd, f)
 
-    # ============================================================
-    # APP PRINCIPAL
-    # ============================================================
+save_npz("data/matriz_tfidf.npz", X_tfidf)
 
-    st.sidebar.title(f"👤 Bienvenido, {name}")
-    authenticator.logout("Cerrar sesión", "sidebar")
+print("✅ datos_con_texto.csv guardado")
+print("✅ tfidf_vectorizer.pkl guardado")
+print("✅ svd_lsa.pkl guardado")
+print("✅ matriz_tfidf.npz guardado")
 
-    st.title("🔍 Fraudlytics")
-    st.subheader("Sistema inteligente de detección de fraude en transacciones financieras")
-
-    st.sidebar.title("⚙️ Configuración")
-    archivo = st.sidebar.file_uploader("📂 Subir CSV de transacciones", type=["csv"])
-
-    if archivo is not None:
-        df = pd.read_csv(archivo)
-        st.success(f"✅ Archivo cargado: {df.shape[0]} transacciones")
-
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 Resumen",
-            "📈 Visualización",
-            "🤖 Detección de Fraude",
-            "📋 Reporte"
-        ])
-
-        with tab1:
-            st.header("📊 Resumen del dataset")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total transacciones", f"{df.shape[0]:,}")
-            if "Class" in df.columns:
-                fraudes = df[df["Class"] == 1].shape[0]
-                normales = df[df["Class"] == 0].shape[0]
-                col2.metric("Transacciones normales", f"{normales:,}")
-                col3.metric("Fraudes", f"{fraudes:,}", delta=f"{fraudes/df.shape[0]:.2%}")
-            st.dataframe(df.head(20))
-            st.dataframe(df.describe())
-
-        with tab2:
-            st.header("📈 Visualización de patrones")
-            if "Class" in df.columns and "Amount" in df.columns:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.subheader("Distribución de montos")
-                    fig, ax = plt.subplots()
-                    df[df["Class"] == 0]["Amount"].hist(bins=50, ax=ax, color="steelblue", alpha=0.7, label="Normal")
-                    df[df["Class"] == 1]["Amount"].hist(bins=50, ax=ax, color="red", alpha=0.7, label="Fraude")
-                    ax.legend()
-                    st.pyplot(fig)
-                with col2:
-                    st.subheader("Conteo de transacciones")
-                    fig, ax = plt.subplots()
-                    counts = df["Class"].value_counts()
-                    ax.bar(["Normal", "Fraude"], counts.values, color=["steelblue", "red"])
-                    st.pyplot(fig)
-
-        with tab3:
-            st.header("🤖 Detección de Fraude")
-            if "Class" in df.columns:
-                features = [col for col in df.columns if col.startswith("V")]
-                if len(features) > 0:
-                    from sklearn.metrics import (
-                        f1_score, precision_score, recall_score,
-                        confusion_matrix, roc_auc_score, precision_recall_curve
-                    )
-                    from xgboost import XGBClassifier
-
-                    algoritmo = st.selectbox(
-                        "🤖 Elige el algoritmo:",
-                        ["Regresión Logística", "XGBoost"]
-                    )
-
-                    X = df[features].values
-                    y = df["Class"].values
-                    scaler = StandardScaler()
-                    X_scaled = scaler.fit_transform(X)
-
-                    if algoritmo == "Regresión Logística":
-                        modelo = LogisticRegression(max_iter=1000, class_weight="balanced")
-                    else:
-                        modelo = XGBClassifier(
-                            scale_pos_weight=len(y[y==0])/len(y[y==1]),
-                            n_estimators=100,
-                            max_depth=6,
-                            learning_rate=0.1,
-                            random_state=42,
-                            eval_metric="logloss"
-                        )
-
-                    modelo.fit(X_scaled, y)
-                    df["probabilidad_fraude"] = modelo.predict_proba(X_scaled)[:, 1]
-                    df["prediccion"] = modelo.predict(X_scaled)
-
-                    st.success("✅ Modelo entrenado")
-
-                    f1 = f1_score(y, df["prediccion"])
-                    precision = precision_score(y, df["prediccion"])
+print(f"\n{'='*55}")
+print("📊 RESUMEN PASO 3")
+print(f"{'='*55}")
+print(f"   Transacciones procesadas: {len(df):,}")
+print(f"   Vocabulario TF-IDF:       {X_tfidf.shape[1]:,} términos")
+print(f"   Dimensiones LSA:          50")
+print(f"   Varianza explicada:       {varianza_explicada:.2%}")
+print(f"   Top bigrama:              {' '.join(top_bigramas[0][0])}")
+print(f"{'='*55}")
+print("\n🎉 Paso 3 completado exitosamente!")
